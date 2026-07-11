@@ -1,0 +1,165 @@
+name: CI-CD Plataforma Transportes
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build-and-deploy:
+
+    runs-on: ubuntu-latest
+
+    env:
+
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      USER_SERVER: ${{ secrets.USER_SERVER }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+###########################################################
+# JAVA
+###########################################################
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 21
+
+###########################################################
+# BUILD PRODUCTOR
+###########################################################
+
+    - name: Give execute permission Producer
+      run: chmod +x PlataformaTransportes/mvnw
+    
+    - name: Build Producer
+      working-directory: PlataformaTransportes
+      run: ./mvnw clean package -DskipTests
+
+###########################################################
+# BUILD CONSUMIDOR
+###########################################################
+
+    - name: Give execute permission Consumer
+      run: chmod +x consumidor/mvnw
+    
+    - name: Build Consumer
+      working-directory: consumidor
+      run: ./mvnw clean package -DskipTests
+
+###########################################################
+# LOGIN DOCKER HUB
+###########################################################
+
+    - name: Login DockerHub
+      run: echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+
+###########################################################
+# BUILD IMAGES
+###########################################################
+
+    - name: Build Producer Image
+      run: |
+        docker build \
+        -t ${DOCKERHUB_USERNAME}/plat-trans-productor:latest \
+        PlataformaTransportes
+    
+    - name: Build Consumer Image
+      run: |
+        docker build \
+        -t ${DOCKERHUB_USERNAME}/plat-trans-consumidor:latest \
+        consumidor
+
+###########################################################
+# PUSH IMAGES
+###########################################################
+
+    - name: Push Producer
+      run: docker push ${DOCKERHUB_USERNAME}/plat-trans-productor:latest
+    
+    - name: Push Consumer
+      run: docker push ${DOCKERHUB_USERNAME}/plat-trans-consumidor:latest
+
+###########################################################
+# SSH KEY
+###########################################################
+
+    - name: Create SSH Key
+      run: |
+        echo "${EC2_SSH_KEY}" > private_key.pem
+        chmod 600 private_key.pem
+
+###########################################################
+# COPY DOCKER COMPOSE
+###########################################################
+
+    - name: Copy docker-compose.yml
+      run: |
+        scp \
+        -o StrictHostKeyChecking=no \
+        -i private_key.pem \
+        docker-compose.yml \
+        ${USER_SERVER}@${EC2_HOST}:/home/ubuntu/docker-compose.yml
+
+###########################################################
+# DEPLOY
+###########################################################
+
+    - name: Deploy EC2
+      run: |
+
+        ssh -o StrictHostKeyChecking=no \
+        -i private_key.pem \
+        ${USER_SERVER}@${EC2_HOST} "
+
+        set -e
+
+        export DB_USERNAME='${DB_USERNAME}'
+        export DB_PASSWORD='${DB_PASSWORD}'
+
+        export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}'
+        export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}'
+        export AWS_SESSION_TOKEN='${AWS_SESSION_TOKEN}'
+
+        cd /home/ubuntu
+
+        # Instalar Docker Compose V2 si no existe
+        if ! docker compose version >/dev/null 2>&1; then
+
+          sudo apt-get update
+
+          sudo apt-get install -y docker-compose-v2 || \
+          sudo apt-get install -y docker-compose-plugin
+
+        fi
+
+        echo '${DOCKERHUB_TOKEN}' | docker login \
+          -u ${DOCKERHUB_USERNAME} \
+          --password-stdin
+
+        docker compose down
+
+        docker compose pull
+
+        docker compose up -d
+
+        docker ps
+
+        "
