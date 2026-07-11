@@ -101,11 +101,17 @@ jobs:
 # SSH KEY
 ###########################################################
 
-    - name: Verify SSH key
+    - name: Create SSH Key
       run: |
-        printf "%s" "${EC2_SSH_KEY}" > private_key.pem
+        printf "%s" "${EC2_SSH_KEY}" | tr -d '\r' > private_key.pem
         chmod 600 private_key.pem
-        ssh-keygen -lf private_key.pem
+    
+    - name: Test SSH
+      run: |
+        ssh -vvv \
+          -o StrictHostKeyChecking=no \
+          -i private_key.pem \
+          ${USER_SERVER}@${EC2_HOST} exit
 
 ###########################################################
 # COPY DOCKER COMPOSE
