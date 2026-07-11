@@ -103,7 +103,7 @@ jobs:
 
     - name: Create SSH Key
       run: |
-        echo "${EC2_SSH_KEY}" > private_key.pem
+        printf "%s" "${EC2_SSH_KEY}" > private_key.pem
         chmod 600 private_key.pem
 
 ###########################################################
