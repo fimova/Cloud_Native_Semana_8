@@ -1,0 +1,28 @@
+# Variables de entorno
+.env
+
+# Maven
+target/
+
+# VS Code
+.vscode/
+
+# IntelliJ
+.idea/
+*.iml
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# Logs
+*.log
+
+# Oracle Wallet
+wallet/
+Wallet_TESTDB1/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

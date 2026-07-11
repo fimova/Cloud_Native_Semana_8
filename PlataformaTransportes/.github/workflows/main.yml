@@ -1,0 +1,109 @@
+name: CI-CD Plataforma Transportes 
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+      USER_SERVER: ${{ secrets.USER_SERVER }}
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Grant execute permission
+        run: chmod +x mvnw
+
+      - name: Build application
+        run: ./mvnw clean package -DskipTests
+
+      - name: Login DockerHub
+        run: |
+          echo "${DOCKERHUB_TOKEN}" | docker login \
+            -u "${DOCKERHUB_USERNAME}" \
+            --password-stdin
+
+      - name: Build image
+        run: |
+          docker build \
+            -t ${DOCKERHUB_USERNAME}/plataforma-transportes:latest .
+
+      - name: Push image
+        run: |
+          docker push \
+            ${DOCKERHUB_USERNAME}/plataforma-transportes:latest
+
+      - name: Create SSH key
+        run: |
+          echo "${EC2_SSH_KEY}" > private_key.pem
+          chmod 600 private_key.pem
+
+      - name: Deploy EC2
+        run: |
+          ssh \
+            -o StrictHostKeyChecking=no \
+            -i private_key.pem \
+            ${USER_SERVER}@${EC2_HOST} << EOF
+
+          sudo mkdir -p /efs/guias
+
+          if ! mount | grep -q "/efs/guias"; then
+            echo "Montando EFS..."
+
+            sudo mount -t nfs4 \
+              -o nfsvers=4.1 \
+              fs-07372b4741449859c.efs.us-east-1.amazonaws.com:/ \
+              /efs/guias
+          else
+            echo "EFS ya estaba montado"
+          fi
+
+          echo "Contenido actual EFS:"
+          ls -la /efs/guias
+
+          docker pull ${DOCKERHUB_USERNAME}/plataforma-transportes:latest
+
+          docker stop plataforma-transportes || true
+          docker rm plataforma-transportes || true
+
+          docker run -d \
+            --restart always \
+            -p 8080:8080 \
+            -v /efs/guias:/efs/guias \
+            --name plataforma-transportes \
+            -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
+            -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
+            -e AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN} \
+            ${DOCKERHUB_USERNAME}/plataforma-transportes:latest
+
+          echo "Validando volumen"
+
+          docker exec plataforma-transportes ls /efs/guias
+
+          docker ps
+
+          docker logs plataforma-transportes --tail 50
+
+          EOF

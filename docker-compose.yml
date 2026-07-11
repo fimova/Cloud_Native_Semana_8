@@ -1,0 +1,58 @@
+services:
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  plataforma-transportes:
+
+    image: fimova/plat-trans-productor:latest
+
+    container_name: plataforma-transportes
+
+    depends_on:
+      - rabbitmq
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+
+  consumidor:
+
+    image: fimova/plat-trans-consumidor:latest
+
+    container_name: consumidor
+
+    depends_on:
+      - rabbitmq
+
+    ports:
+      - "8081:8081"
+
+    environment:
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+
+    volumes:
+      - "/home/ubuntu/wallet:/wallet"
